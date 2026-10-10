@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Bot, LogOut, Network } from 'lucide-react';
+import { Bot, Info, LogOut, Network } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { SESSION_KEY, client } from '@/lib/sky';
+import { SESSION_KEY } from '@/lib/sky';
+import { useAccount } from '@/contexts/AccountContext';
+import LoginPage from '@/pages/LoginPage';
 import Workbench from '@/components/sky/Workbench';
+import AccountPanel from '@/components/sky/AccountPanel';
 import { ConfigPanel, HistoryPanel, RolesPanel } from '@/components/sky/Settings';
 
 const TABS = [
@@ -10,11 +13,12 @@ const TABS = [
   ['roles', '角色'],
   ['history', '历史'],
   ['config', '模型配置'],
+  ['account', '我的账号'],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 
 export default function Index() {
-  const [auth, setAuth] = useState<'loading' | 'in' | 'out'>('loading');
+  const { status, user, isDemo, signOut } = useAccount();
   const [tab, setTab] = useState<Tab>('work');
   const [historyKey, setHistoryKey] = useState(0);
   const [sessionId, setSessionId] = useState<number | null>(() => {
@@ -27,51 +31,62 @@ export default function Index() {
     else localStorage.removeItem(SESSION_KEY);
   };
 
+  // Drop the remembered session when the signed-in account changes.
   useEffect(() => {
-    client.auth.me().then((r) => setAuth(r?.data ? 'in' : 'out')).catch(() => setAuth('out'));
-  }, []);
+    if (status === 'out') {
+      setSessionId(null);
+      localStorage.removeItem(SESSION_KEY);
+      setTab('work');
+    }
+  }, [status]);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-10 border-b bg-background/95">
         <div className="mx-auto flex h-14 max-w-[1600px] items-center gap-6 px-4">
-          <div className="flex items-center gap-2 font-semibold"><Network className="h-5 w-5 text-primary" />Sky Agent</div>
-          {auth === 'in' && (
+          <div className="flex items-center gap-2 font-semibold">
+            <Network className="h-5 w-5 text-primary" />Sky Agent
+          </div>
+          {status === 'in' && (
             <nav className="flex gap-1">
               {TABS.map(([k, label]) => (
-                <button key={k} onClick={() => setTab(k)} className={`rounded-md px-3 py-1.5 text-sm ${tab === k ? 'bg-muted font-medium' : 'text-muted-foreground hover:text-foreground'}`}>{label}</button>
+                <button
+                  key={k}
+                  onClick={() => setTab(k)}
+                  className={`rounded-md px-3 py-1.5 text-sm ${tab === k ? 'bg-muted font-medium' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  {label}
+                </button>
               ))}
             </nav>
           )}
-          <div className="ml-auto">
-            {auth === 'in' ? (
-              <Button variant="ghost" size="sm" onClick={() => client.auth.logout()} aria-label="退出登录"><LogOut className="h-4 w-4" /></Button>
-            ) : auth === 'out' ? (
-              <Button size="sm" onClick={() => client.auth.toLogin()}>登录</Button>
-            ) : null}
+          <div className="ml-auto flex items-center gap-2">
+            {status === 'in' && isDemo && (
+              <span className="hidden items-center gap-1 rounded-md border px-2 py-1 text-xs text-muted-foreground sm:flex">
+                <Info className="h-3 w-3" />
+                演示账号（只读）
+              </span>
+            )}
+            {status === 'in' && (
+              <Button variant="ghost" size="sm" onClick={signOut} aria-label="退出登录">
+                <LogOut className="mr-1 h-4 w-4" />
+                <span className="hidden sm:inline">退出登录</span>
+              </Button>
+            )}
           </div>
         </div>
       </header>
+
       <main className="mx-auto max-w-[1600px] p-4">
-        {auth === 'loading' && <p className="text-sm text-muted-foreground">加载中…</p>}
-        {auth === 'out' && (
-          <section className="mx-auto max-w-3xl py-16">
-            <p className="mb-3 font-mono text-sm text-primary">多 Agent 协作 · 从需求到可运行产物</p>
-            <h1 className="text-4xl font-bold leading-tight">一句话需求，交给一支 AI 软件团队</h1>
-            <p className="mt-4 text-muted-foreground">Sky Agent 是一个多 Agent 协作站点：产品经理、架构师、工程师等角色通过共享消息池发布与订阅消息，按 SOP 顺序协作，产出 PRD、系统设计和可直接下载的代码。使用你自己的 OpenAI 兼容 API Key。</p>
-            <div className="mt-8 flex flex-wrap items-center gap-2 text-sm">
-              {['用户需求', 'Emma · 产品经理', 'Bob · 架构师', 'Alex · 工程师', '代码产物'].map((s, i) => (
-                <span key={s} className="flex items-center gap-2">
-                  {i > 0 && <span className="text-muted-foreground">→</span>}
-                  <span className="flex items-center gap-1 rounded-md border bg-card px-3 py-2"><Bot className="h-4 w-4 text-primary" />{s}</span>
-                </span>
-              ))}
-            </div>
-            <Button className="mt-8" size="lg" onClick={() => client.auth.toLogin()}>登录后开始</Button>
-          </section>
-        )}
-        {auth === 'in' && (
+        {status === 'loading' && <p className="py-16 text-center text-sm text-muted-foreground">正在校验登录状态…</p>}
+        {status === 'out' && <LoginPage />}
+        {status === 'in' && (
           <>
+            {isDemo && (
+              <p className="mb-3 rounded-md border bg-muted px-3 py-2 text-sm text-muted-foreground">
+                当前为演示账号，数据公开共享且为只读：可以浏览示例项目、对话过程与产物，但不能创建或修改数据。注册自己的账号即可使用完整功能。
+              </p>
+            )}
             <div className={tab === 'work' ? '' : 'hidden'}>
               <Workbench sessionId={sessionId} onSession={changeSession} onDone={() => setHistoryKey((k) => k + 1)} />
             </div>
@@ -86,6 +101,7 @@ export default function Index() {
               />
             )}
             {tab === 'config' && <ConfigPanel />}
+            {tab === 'account' && <AccountPanel />}
           </>
         )}
       </main>

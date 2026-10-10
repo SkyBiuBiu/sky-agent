@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/card';
 import {
   Artifact, PoolMessage, Project, Role, SESSION_KEY, STATUS_LABEL, api, client, errMsg, loadProjectData,
 } from '@/lib/sky';
+import { useAccount } from '@/contexts/AccountContext';
 import { ArtifactPanel, MessagePool } from './Panels';
 
 interface PlanItem { id: number; name: string; profile: string }
@@ -19,6 +20,7 @@ export default function Workbench({ sessionId, onSession, onDone }: {
   onSession: (id: number | null) => void;
   onDone: () => void;
 }) {
+  const { isDemo } = useAccount();
   const [input, setInput] = useState('');
   const [project, setProject] = useState<Project | null>(null);
   const [plan, setPlan] = useState<PlanItem[]>([]);
@@ -117,6 +119,10 @@ export default function Workbench({ sessionId, onSession, onDone }: {
   async function send() {
     const text = input.trim();
     if (!text) return;
+    if (isDemo) {
+      setError('演示账号为只读账号，注册后即可创建并保存自己的项目');
+      return;
+    }
     setError('');
     try {
       const res = project
@@ -173,21 +179,32 @@ export default function Workbench({ sessionId, onSession, onDone }: {
         <Textarea
           rows={5}
           value={input}
-          disabled={running}
+          disabled={running || isDemo}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send();
           }}
-          placeholder={project ? '例如：加一个暗色模式切换按钮；把 PRD 改得更简洁' : '例如：做一个待办清单网页 demo'}
+          placeholder={
+            isDemo
+              ? '演示账号为只读账号，可浏览下方示例项目；注册后即可创建自己的项目'
+              : project
+                ? '例如：加一个暗色模式切换按钮；把 PRD 改得更简洁'
+                : '例如：做一个待办清单网页 demo'
+          }
         />
         {running ? (
           <Button className="w-full" variant="destructive" onClick={stop}>
             <Square className="mr-1 h-4 w-4" /> 停止任务
           </Button>
         ) : (
-          <Button className="w-full" disabled={!input.trim()} onClick={send}>
+          <Button className="w-full" disabled={!input.trim() || isDemo} onClick={send}>
             <Send className="mr-1 h-4 w-4" /> {project ? `发送并生成 v${version + 1}` : '启动 Agent 团队'}
           </Button>
+        )}
+        {isDemo && (
+          <p className="rounded-md bg-muted p-2 text-xs text-muted-foreground">
+            演示账号为只读账号：可以直接查看右侧的协作消息与产物，或到「历史」中打开示例项目。注册自己的账号即可创建项目、配置模型并保存历史。
+          </p>
         )}
         <div>
           <h3 className="mb-2 text-sm font-semibold">SOP 流水线</h3>

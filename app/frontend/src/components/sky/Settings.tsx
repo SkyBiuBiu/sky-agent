@@ -8,11 +8,16 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { Artifact, LlmConfig, PoolMessage, Project, ROLE_TYPES, Role, STATUS_LABEL, api, client, errMsg, loadProjectData } from '@/lib/sky';
+import { useAccount } from '@/contexts/AccountContext';
 import { ArtifactPanel, MessagePool } from './Panels';
 
 const testCache = new Map<string, number>();
 
+/** Shown on every write control the shared read-only demo account must not use. */
+const DEMO_HINT = '演示账号为只读账号，注册后即可修改。';
+
 export function ConfigPanel() {
+  const { isDemo } = useAccount();
   const [cfg, setCfg] = useState<LlmConfig | null>(null);
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState('');
@@ -60,9 +65,10 @@ export function ConfigPanel() {
         <Input type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} placeholder="sk-..." />
       </div>
       <div className="flex gap-2">
-        <Button onClick={() => act('save')} disabled={!!busy}>{busy === 'save' ? '保存中…' : '保存'}</Button>
-        <Button variant="outline" onClick={() => act('test')} disabled={!!busy}>{busy === 'test' ? '测试中…' : '连通性测试'}</Button>
+        <Button onClick={() => act('save')} disabled={!!busy || isDemo}>{busy === 'save' ? '保存中…' : '保存'}</Button>
+        <Button variant="outline" onClick={() => act('test')} disabled={!!busy || isDemo}>{busy === 'test' ? '测试中…' : '连通性测试'}</Button>
       </div>
+      {isDemo && <p className="text-xs text-muted-foreground">{DEMO_HINT}</p>}
     </Card>
   );
 }
@@ -70,6 +76,7 @@ export function ConfigPanel() {
 const blank = { name: '', profile: '', goal: '', system_prompt: '', subscribe_types: 'Code', publish_type: 'Review', artifact_kind: 'doc', sop_order: 4, enabled: true };
 
 export function RolesPanel() {
+  const { isDemo } = useAccount();
   const [roles, setRoles] = useState<Role[]>([]);
   const load = async () => {
     await api('/api/v1/sky/roles/init');
@@ -101,8 +108,9 @@ export function RolesPanel() {
           <h2 className="text-lg font-semibold">Agent 角色</h2>
           <p className="text-xs text-muted-foreground">角色通过「订阅类型」从消息池接收消息，按 SOP 位置依次执行，并发布「发布类型」的消息。可用类型：{ROLE_TYPES.join(' / ')} 或自定义。</p>
         </div>
-        <Button onClick={add}><Plus className="mr-1 h-4 w-4" />新增角色</Button>
+        <Button onClick={add} disabled={isDemo}><Plus className="mr-1 h-4 w-4" />新增角色</Button>
       </div>
+      {isDemo && <p className="text-xs text-muted-foreground">{DEMO_HINT}</p>}
       <div className="grid gap-4 md:grid-cols-2">
         {roles.map((r) => (
           <Card key={r.id} className="space-y-2 p-4">
@@ -126,8 +134,8 @@ export function RolesPanel() {
             <div className="flex items-center justify-between pt-1">
               <label className="flex items-center gap-2 text-sm"><Switch checked={r.enabled} onCheckedChange={(v) => patch(r.id, { enabled: v })} />启用</label>
               <div className="flex gap-2">
-                <Button size="sm" variant="ghost" onClick={() => del(r.id)} aria-label="删除角色"><Trash2 className="h-4 w-4" /></Button>
-                <Button size="sm" onClick={() => save(r)}>保存</Button>
+                <Button size="sm" variant="ghost" disabled={isDemo} onClick={() => del(r.id)} aria-label="删除角色"><Trash2 className="h-4 w-4" /></Button>
+                <Button size="sm" disabled={isDemo} onClick={() => save(r)}>保存</Button>
               </div>
             </div>
           </Card>

@@ -12,6 +12,9 @@ logger = logging.getLogger(__name__)
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
+# Subject of the shared read-only demo account (see services/accounts.py).
+DEMO_READONLY_SUBJECT = "sky-demo-account"
+
 
 async def get_bearer_token(
     request: Request, credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme)
@@ -24,7 +27,7 @@ async def get_bearer_token(
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication credentials were not provided")
 
 
-async def get_current_user(token: str = Depends(get_bearer_token)) -> UserResponse:
+async def get_current_user(request: Request, token: str = Depends(get_bearer_token)) -> UserResponse:
     """Dependency to get current authenticated user via JWT token."""
     try:
         payload = decode_access_token(token)
@@ -36,6 +39,16 @@ async def get_current_user(token: str = Depends(get_bearer_token)) -> UserRespon
     user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication token")
+
+    # The shared demo account is read-only so visitors never overwrite each other's demo data.
+    # Enforced centrally here so no write route (including generated entity routes) can bypass it.
+    if user_id == DEMO_READONLY_SUBJECT and request.method not in ("GET", "HEAD", "OPTIONS"):
+        if not request.url.path.startswith("/api/v1/sky/accounts/"):
+            logger.info("Blocked write attempt on read-only demo account: %s %s", request.method, request.url.path)
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="演示账号为只读账号，注册后即可创建和修改自己的项目",
+            )
 
     last_login_raw = payload.get("last_login")
     last_login = None

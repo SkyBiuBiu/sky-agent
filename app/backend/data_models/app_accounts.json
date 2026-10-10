@@ -1,0 +1,40 @@
+{
+    "title": "app_accounts",
+    "type": "object",
+    "description": "Sky Agent custom email/password accounts, separate from platform OIDC users",
+    "properties": {
+        "id": {
+            "type": "integer"
+        },
+        "account_id": {
+            "type": "string",
+            "description": "stable account identifier used as JWT subject"
+        },
+        "email": {
+            "type": "string"
+        },
+        "username": {
+            "type": "string",
+            "description": "login alias, e.g. demo"
+        },
+        "password_hash": {
+            "type": "string",
+            "description": "pbkdf2-sha256 hash with salt"
+        },
+        "name": {
+            "type": "string"
+        },
+        "is_demo": {
+            "type": "boolean",
+            "description": "demo account flag: read-only shared data"
+        }
+    },
+    "required": [
+        "account_id",
+        "email",
+        "username",
+        "password_hash",
+        "name",
+        "is_demo"
+    ]
+}
