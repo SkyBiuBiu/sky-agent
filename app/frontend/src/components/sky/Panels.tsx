@@ -3,7 +3,7 @@ import Markdown from 'markdown-to-jsx';
 import { AlertTriangle, Download, ExternalLink, FileCode2, FileText, Package, RefreshCw } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Artifact, PoolMessage, buildPreview, downloadFile, downloadZip, typeColor } from '@/lib/sky';
+import { Artifact, PoolMessage, buildPreview, downloadFile, downloadZip, roleLabel, roleListLabel, typeColor } from '@/lib/sky';
 
 export function MessagePool({ messages, live }: { messages: PoolMessage[]; live?: { sender: string; text: string } | null }) {
   return (
@@ -18,7 +18,7 @@ export function MessagePool({ messages, live }: { messages: PoolMessage[]; live?
         <div className="rounded-lg border border-primary/40 bg-card p-3">
           <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
             <span className="h-2 w-2 animate-pulse rounded-full bg-primary" />
-            {live.sender} 正在输出…
+            {roleLabel(live.sender)} 正在输出…
           </div>
           <pre className="max-h-72 overflow-auto whitespace-pre-wrap font-mono text-xs text-muted-foreground">{live.text || '思考中…'}</pre>
         </div>
@@ -34,9 +34,9 @@ function MessageCard({ m }: { m: PoolMessage }) {
     <div className={`rounded-lg border p-3 shadow-sm ${isUser ? 'bg-muted/60' : 'bg-card'}`}>
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="rounded bg-secondary px-1.5 font-mono text-xs text-secondary-foreground">v{m.version || 1}</span>
-        <span className="font-semibold">{isUser ? '你' : m.sender}</span>
+        <span className="font-semibold">{isUser ? '你' : roleLabel(m.sender)}</span>
         <span className={`rounded-full px-2 py-0.5 text-xs ${typeColor(m.msg_type)}`}>{m.msg_type}</span>
-        <span className="text-xs text-muted-foreground">→ 订阅者：{m.subscribers || '无'}</span>
+        <span className="text-xs text-muted-foreground">→ 订阅者：{roleListLabel(m.subscribers) || '无'}</span>
         {m.prompt_tokens + m.completion_tokens > 0 && (
           <span className="ml-auto font-mono text-xs text-muted-foreground">
             in {m.prompt_tokens} / out {m.completion_tokens} tokens

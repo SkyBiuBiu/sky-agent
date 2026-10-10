@@ -13,19 +13,24 @@ from models.llm_configs import Llm_configs
 
 DEFAULT_ROLES: List[Dict[str, Any]] = [
     {
-        "name": "Emma", "profile": "产品经理", "goal": "把用户需求整理为清晰可执行的 PRD",
+        "name": "产品经理", "profile": "产品经理", "goal": "把用户需求整理为清晰可执行的 PRD",
         "system_prompt": "你是资深产品经理。根据用户需求输出一份 Markdown 格式的 PRD，包含：产品目标、用户故事、需求池（P0/P1/P2）、UI 草图描述、待确认问题。只输出 PRD 正文。",
         "subscribe_types": "UserRequirement", "publish_type": "PRD", "artifact_kind": "doc", "sop_order": 1,
     },
     {
-        "name": "Bob", "profile": "架构师", "goal": "基于 PRD 设计简洁可用的系统",
+        "name": "架构师", "profile": "架构师", "goal": "基于 PRD 设计简洁可用的系统",
         "system_prompt": "你是资深软件架构师。根据 PRD 输出 Markdown 格式的系统设计，包含：实现方案、技术选型、文件列表、数据结构与接口（可用 mermaid classDiagram）、调用流程（mermaid sequenceDiagram）。只输出设计正文。",
         "subscribe_types": "PRD", "publish_type": "SystemDesign", "artifact_kind": "doc", "sop_order": 2,
     },
     {
-        "name": "Alex", "profile": "工程师", "goal": "根据系统设计编写完整可运行的代码",
-        "system_prompt": "你是资深工程师。根据系统设计实现一个可直接在浏览器打开运行的 demo。硬性要求：只输出 1 个文件 index.html，CSS 与 JS 全部内联，不使用构建工具；如确需第三方库只能用 https CDN 链接，禁止引用任何本地文件；代码精简，总长度控制在 300 行以内，确保完整输出到 </html>；直接写代码，不要解释。严格使用如下格式输出：\n### FILE: index.html\n```html\n完整代码\n```\n不要输出省略号或 TODO。",
+        "name": "工程师", "profile": "工程师", "goal": "根据系统设计编写完整可运行的代码",
+        "system_prompt": "你是资深工程师。根据系统设计实现一个可直接在浏览器打开运行的 demo。硬性要求：只输出 1 个文件 index.html，CSS 与 JS 全部内联，不使用构建工具；如确需第三方库只能用 https CDN 链接，禁止引用任何本地文件；代码精简，总长度控制在 300 行以内，确保完整输出到 </html>；直接写代码，不要解释。严格使用如下格式输出：\n### FILE: index.html\n```html\n完整代码\n```\n如用到 localStorage/sessionStorage，必须用 try/catch 包裹，不可用时降级为内存存储，不得因存储异常导致白屏；不要输出省略号或 TODO。",
         "subscribe_types": "SystemDesign", "publish_type": "Code", "artifact_kind": "code", "sop_order": 3,
+    },
+    {
+        "name": "QA工程师", "profile": "QA工程师", "goal": "审查工程师产出的代码与可预览页面，保证可用性与质量",
+        "system_prompt": "你是资深 QA 工程师。根据原始需求、PRD 与工程师交付的 index.html 代码做静态审查（你无法真正运行页面，请基于代码推断运行效果）。输出 Markdown 格式的测试报告，包含：1. 测试结论（通过 / 有条件通过 / 不通过）；2. 测试用例表（编号、场景、步骤、预期结果、根据代码判断的结果）；3. 问题清单（严重程度：高/中/低、位置、现象）；4. 修复建议（具体到函数或代码片段）。只输出报告正文。",
+        "subscribe_types": "Code", "publish_type": "TestReport", "artifact_kind": "doc", "sop_order": 4,
     },
 ]
 
@@ -48,24 +53,53 @@ async def get_config(db: AsyncSession, user_id: str) -> Optional[Llm_configs]:
     return res.scalars().first()
 
 
-async def ensure_roles(db: AsyncSession, user_id: str) -> List[Agent_roles]:
+def order_key(r: Agent_roles):
+    return (r.sop_order, r.id)
+
+
+def _by_order(roles: List[Agent_roles]) -> List[Agent_roles]:
+    return sorted(roles, key=order_key)
+
+
+async def own_roles(db: AsyncSession, user_id: str) -> List[Agent_roles]:
     res = await db.execute(select(Agent_roles).where(Agent_roles.user_id == user_id))
-    roles = list(res.scalars().all())
-    if not roles:
-        for r in DEFAULT_ROLES:
-            db.add(Agent_roles(user_id=user_id, enabled=True, **r))
+    return _by_order(list(res.scalars().all()))
+
+
+async def normalize_order(db: AsyncSession, user_id: str) -> List[Agent_roles]:
+    """Renumber the user's roles 1..n in their current order so shown positions equal execution order."""
+    roles = await own_roles(db, user_id)
+    changed = False
+    for i, r in enumerate(roles, start=1):
+        if r.sop_order != i:
+            r.sop_order, changed = i, True
+    if changed:
         await db.commit()
-        res = await db.execute(select(Agent_roles).where(Agent_roles.user_id == user_id))
-        roles = list(res.scalars().all())
-    # Upgrade untouched default engineer prompts from older releases to the single-file demo prompt.
-    new_prompt = DEFAULT_ROLES[2]["system_prompt"]
-    stale = [r for r in roles if r.artifact_kind == "code" and r.system_prompt != new_prompt
-             and r.system_prompt.startswith("你是资深工程师。根据系统设计实现完整可运行的代码")]
-    if stale:
-        for r in stale:
-            r.system_prompt = new_prompt
-        await db.commit()
-    return sorted(roles, key=lambda r: (r.sop_order, r.id))
+    return roles
+
+
+async def seed_default_roles(db: AsyncSession, user_id: str) -> None:
+    """Give a user their own copies of the default roles. Idempotent: skips names the user already has;
+    the user's other roles keep their relative order after the defaults."""
+    existing = await own_roles(db, user_id)
+    names = {r.name for r in existing}
+    added = [Agent_roles(user_id=user_id, enabled=True, **r) for r in DEFAULT_ROLES if r["name"] not in names]
+    if not added:
+        return
+    for r in added:
+        db.add(r)
+    await db.flush()
+    defaults = {r["name"]: r["sop_order"] for r in DEFAULT_ROLES}
+    everyone = existing + added
+    ranked = sorted(everyone, key=lambda r: (0, defaults[r.name], 0) if r.name in defaults
+                    else (1, r.sop_order, r.id or 0))
+    for i, r in enumerate(ranked, start=1):
+        r.sop_order = i
+    await db.commit()
+
+
+def enabled_roles(roles: List[Agent_roles]) -> List[Agent_roles]:
+    return [r for r in roles if r.enabled]
 
 
 def split_types(value: str) -> List[str]:

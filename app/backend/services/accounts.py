@@ -1,3 +1,4 @@
+import json
 """Email/password accounts for Sky Agent.
 
 Signs the same application JWT the platform issues, so every existing `/api/v1/*`
@@ -18,6 +19,7 @@ from core.auth import create_access_token
 from core.config import settings
 from models.app_accounts import App_accounts
 from models.artifacts import Artifacts
+from models.run_plans import Run_plans
 from models.pool_messages import Pool_messages
 from models.projects import Projects
 
@@ -135,6 +137,8 @@ async def register(db: AsyncSession, email: str, password: str, name: str = "") 
     )
     db.add(account)
     await db.commit()
+    from services.sky import seed_default_roles
+    await seed_default_roles(db, account.account_id)
     return account
 
 
@@ -178,86 +182,58 @@ async def ensure_demo_account(db: AsyncSession) -> App_accounts:
         account.password_hash = hash_password(DEMO_PASSWORD)
         await db.commit()
     await seed_demo_content(db, account.account_id)
+    from services.sky import seed_default_roles
+    await seed_default_roles(db, account.account_id)
     return account
 
 
 DEMO_PROJECTS = [
     {
-        "title": "待办清单网页 demo",
-        "requirement": "做一个待办清单网页 demo，支持新增、勾选完成和删除任务。",
-        "tokens": 18420,
-        "role": "Alex",
-        "prd": "# 待办清单网页 PRD\n\n## 目标\n帮助个人用户在浏览器中快速记录与勾选待办事项。\n\n## 功能\n1. 输入框新增任务\n2. 勾选标记完成\n3. 删除单条任务\n4. 已完成 / 未完成数量统计\n\n## 验收\n刷新页面后任务保留在本地。",
-        "design": "# 系统设计\n\n## 结构\n单文件 `index.html`，内联 CSS 与 JS。\n\n## 数据\n任务数组保存在 `localStorage`，字段：`id`、`text`、`done`。\n\n## 渲染\n列表按新增顺序渲染，每项包含勾选框、文本与删除按钮。",
-        "code": "<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n<meta charset=\"utf-8\" />\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n<title>待办清单</title>\n<style>\nbody{font-family:system-ui,sans-serif;max-width:560px;margin:48px auto;padding:0 16px;color:#111}\nli{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #eee}\n.done{text-decoration:line-through;color:#999}\nbutton{margin-left:auto}\n</style>\n</head>\n<body>\n<h1>待办清单</h1>\n<form id=\"f\"><input id=\"t\" placeholder=\"添加任务\" required /><button>添加</button></form>\n<ul id=\"list\"></ul>\n<p id=\"stat\"></p>\n<script>\nconst KEY='sky-todos';\nlet items=JSON.parse(localStorage.getItem(KEY)||'[]');\nfunction save(){localStorage.setItem(KEY,JSON.stringify(items));render();}\nfunction render(){\n  const list=document.getElementById('list');list.innerHTML='';\n  items.forEach(it=>{\n    const li=document.createElement('li');\n    const cb=document.createElement('input');cb.type='checkbox';cb.checked=it.done;\n    cb.onchange=()=>{it.done=cb.checked;save();};\n    const span=document.createElement('span');span.textContent=it.text;if(it.done)span.className='done';\n    const del=document.createElement('button');del.textContent='删除';del.onclick=()=>{items=items.filter(x=>x!==it);save();};\n    li.append(cb,span,del);list.append(li);\n  });\n  const done=items.filter(i=>i.done).length;\n  document.getElementById('stat').textContent=`共 ${items.length} 条，已完成 ${done} 条`;\n}\ndocument.getElementById('f').onsubmit=e=>{e.preventDefault();const t=document.getElementById('t');items.push({id:Date.now(),text:t.value,done:false});t.value='';save();};\nrender();\n</script>\n</body>\n</html>",
-        "messages": [
-            ("User", "UserRequirement", "做一个待办清单网页 demo，支持新增、勾选完成和删除任务。"),
-            ("Emma", "PRD", "已完成 PRD：目标、功能范围与验收标准已确认，包含新增 / 勾选 / 删除 / 统计四项功能。"),
-            ("Bob", "SystemDesign", "已完成系统设计：单文件 index.html，任务数据存于 localStorage，列表按新增顺序渲染。"),
-            ("Alex", "Code", "已交付 index.html：新增、勾选、删除与统计功能均已实现并通过预览自检。"),
-        ],
-    },
-    {
-        "title": "计算器网页 demo（含暗色模式）",
-        "requirement": "做一个计算器网页，支持加减乘除，并带一个暗色模式切换按钮。",
-        "tokens": 15870,
-        "role": "Alex",
-        "prd": "# 计算器 PRD\n\n## 功能\n1. 数字与四则运算\n2. 清除与退格\n3. 暗色模式切换并记住选择\n\n## 验收\n连续运算结果正确，刷新后主题保持。",
-        "design": "# 系统设计\n\n单文件 `index.html`。运算状态机维护 `current` 与 `previous` 两个值；主题通过 `data-theme` 属性切换，写入 `localStorage`。",
-        "code": "<!DOCTYPE html>\n<html lang=\"zh-CN\" data-theme=\"light\">\n<head>\n<meta charset=\"utf-8\" />\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n<title>计算器</title>\n<style>\n:root{--bg:#fff;--fg:#111;--key:#f4f4f5}\n[data-theme=dark]{--bg:#18181b;--fg:#fafafa;--key:#27272a}\nbody{background:var(--bg);color:var(--fg);font-family:system-ui,sans-serif;display:flex;justify-content:center;padding:48px}\n.grid{display:grid;grid-template-columns:repeat(4,64px);gap:8px}\nbutton{padding:14px;background:var(--key);border:0;border-radius:8px;font-size:16px;cursor:pointer}\n#out{grid-column:span 4;text-align:right;font-size:28px;padding:12px;background:var(--key);border-radius:8px}\n</style>\n</head>\n<body>\n<div class=\"grid\">\n<div id=\"out\">0</div>\n<button data-theme-toggle>暗色模式</button>\n<button data-k=\"C\">C</button><button data-k=\"<-\">←</button><button data-k=\"/\">÷</button>\n<button data-k=\"7\">7</button><button data-k=\"8\">8</button><button data-k=\"9\">9</button><button data-k=\"*\">×</button>\n<button data-k=\"4\">4</button><button data-k=\"5\">5</button><button data-k=\"6\">6</button><button data-k=\"-\">−</button>\n<button data-k=\"1\">1</button><button data-k=\"2\">2</button><button data-k=\"3\">3</button><button data-k=\"+\">+</button>\n<button data-k=\"0\">0</button><button data-k=\".\">.</button><button data-k=\"=\">=</button>\n</div>\n<script>\nlet cur='0',prev=null,op=null;\nconst out=document.getElementById('out');\nconst draw=()=>out.textContent=cur;\nconst apply=()=>{if(prev===null||op===null)return;const a=Number(prev),b=Number(cur);let r=a;if(op==='+')r=a+b;if(op==='-')r=a-b;if(op==='*')r=a*b;if(op==='/')r=b===0?'Error':a/b;cur=String(r);prev=null;op=null;};\ndocument.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>{\n  const k=b.dataset.k;\n  if(k==='C'){cur='0';prev=null;op=null;}\n  else if(k==='<-'){cur=cur.length>1?cur.slice(0,-1):'0';}\n  else if(k==='='){apply();}\n  else if('+-*/'.includes(k)){prev=cur;op=k;cur='0';}\n  else{cur=cur==='0'?k:cur+k;}\n  draw();\n});\nconst root=document.documentElement;\nroot.dataset.theme=localStorage.getItem('sky-theme')||'light';\ndocument.querySelector('[data-theme-toggle]').onclick=()=>{\n  root.dataset.theme=root.dataset.theme==='dark'?'light':'dark';\n  localStorage.setItem('sky-theme',root.dataset.theme);\n};\ndraw();\n</script>\n</body>\n</html>",
-        "messages": [
-            ("User", "UserRequirement", "做一个计算器网页，支持加减乘除，并带一个暗色模式切换按钮。"),
-            ("Emma", "PRD", "已完成 PRD：四则运算、清除与退格、暗色模式切换并记住选择。"),
-            ("Bob", "SystemDesign", "已完成设计：单文件实现，运算用 current/previous 状态机，主题写入 localStorage。"),
-            ("Alex", "Code", "已交付 index.html：四则运算与暗色模式均已实现，预览自检通过。"),
-        ],
-    },
-    {
-        "title": "咖啡店落地页（v2 增加营业时间区块）",
-        "requirement": "做一个咖啡店落地页，介绍招牌饮品和门店信息；第二轮迭代增加营业时间区块。",
-        "tokens": 24360,
-        "role": "Alex",
-        "prd": "# 咖啡店落地页 PRD\n\n## 首屏\n品牌名、一句话标语与「查看菜单」按钮。\n\n## 区块\n1. 招牌饮品三张卡片\n2. 门店信息（地址、电话）\n3. 营业时间（v2 新增）\n\n## 验收\n移动端单列、桌面端三列自适应。",
-        "design": "# 系统设计\n\n单文件 `index.html`，CSS Grid 响应式布局；门店信息使用卡片容器，v2 追加营业时间表格区块并复用相同的间距变量。",
-        "code": "<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n<meta charset=\"utf-8\" />\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n<title>山海咖啡</title>\n<style>\nbody{margin:0;font-family:system-ui,sans-serif;color:#2b2117;background:#fbf7f2}\nheader{padding:72px 24px;text-align:center}\nh1{font-size:40px;margin:0 0 12px}\n.cta{display:inline-block;margin-top:16px;padding:10px 20px;background:#8b5e34;color:#fff;border-radius:999px;text-decoration:none}\nsection{max-width:960px;margin:0 auto;padding:32px 24px}\n.cards{display:grid;gap:16px}\n@media(min-width:720px){.cards{grid-template-columns:repeat(3,1fr)}}\n.card{background:#fff;border:1px solid #eadfd0;border-radius:12px;padding:16px}\ntable{width:100%;border-collapse:collapse}\ntd{padding:8px 0;border-bottom:1px solid #eadfd0}\n</style>\n</head>\n<body>\n<header>\n<h1>山海咖啡</h1>\n<p>手冲与冷萃，只做当季豆子。</p>\n<a class=\"cta\" href=\"#menu\">查看菜单</a>\n</header>\n<section id=\"menu\">\n<h2>招牌饮品</h2>\n<div class=\"cards\">\n<div class=\"card\"><h3>手冲单品</h3><p>每日两支当季豆，现场研磨。</p></div>\n<div class=\"card\"><h3>冷萃咖啡</h3><p>低温萃取 16 小时，口感顺滑。</p></div>\n<div class=\"card\"><h3>燕麦拿铁</h3><p>燕麦奶与浓缩的经典组合。</p></div>\n</div>\n</section>\n<section>\n<h2>门店信息</h2>\n<p>地址：山海路 12 号<br />电话：000-0000-0000</p>\n</section>\n<section>\n<h2>营业时间</h2>\n<table>\n<tr><td>周一至周五</td><td>08:00 – 20:00</td></tr>\n<tr><td>周六</td><td>09:00 – 21:00</td></tr>\n<tr><td>周日</td><td>09:00 – 18:00</td></tr>\n</table>\n</section>\n</body>\n</html>",
-        "messages": [
-            ("User", "UserRequirement", "做一个咖啡店落地页，介绍招牌饮品和门店信息。"),
-            ("Emma", "PRD", "已完成 PRD：首屏标语 + 招牌饮品卡片 + 门店信息，移动端单列。"),
-            ("Bob", "SystemDesign", "已完成设计：单文件实现，CSS Grid 响应式，卡片复用统一间距变量。"),
-            ("Alex", "Code", "已交付 v1 index.html：首屏、菜单卡片与门店信息完成。"),
-            ("User", "UserRequirement", "增加营业时间区块。"),
-            ("Alex", "Code", "已交付 v2：新增营业时间表格区块，样式复用既有卡片与间距规范。"),
-        ],
+        "title": "待办清单 Demo",
+        "requirement": "做一个简洁的待办清单网页",
+        "tokens": 9600,
+        "prd": '# 待办清单 PRD\n\n## 目标\n在浏览器里快速记录待办事项。\n\n## 功能（P0）\n1. 添加任务\n2. 勾选完成\n3. 删除任务\n\n## 验收\n刷新页面后任务仍在。',
+        "design": '# 系统设计\n\n- 单文件 `index.html`，内联 CSS 与 JS\n- 数据：任务数组 `{text, done}`，存于 `localStorage`\n- 每次变更后整体重新渲染列表',
+        "code": '<!DOCTYPE html>\n<html lang="zh-CN">\n<head>\n<meta charset="utf-8" />\n<meta name="viewport" content="width=device-width, initial-scale=1" />\n<title>待办清单</title>\n<style>\nbody{font-family:system-ui,sans-serif;max-width:480px;margin:40px auto;padding:0 16px;color:#111}\nform{display:flex;gap:8px}input[type=text]{flex:1;padding:8px}\nli{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #eee}\n.done{text-decoration:line-through;color:#999}li button{margin-left:auto}\n</style>\n</head>\n<body>\n<h1>待办清单</h1>\n<form id="f"><input id="t" type="text" placeholder="添加任务" required /><button>添加</button></form>\n<ul id="list"></ul>\n<script>\nconst list=document.getElementById(\'list\');\nlet items=JSON.parse(localStorage.getItem(\'todos\')||\'[]\');\nfunction render(){\n  localStorage.setItem(\'todos\',JSON.stringify(items));\n  list.innerHTML=\'\';\n  items.forEach((it,i)=>{\n    const li=document.createElement(\'li\');\n    li.innerHTML=\'<input type="checkbox"\'+(it.done?\' checked\':\'\')+\'><span\'+(it.done?\' class="done"\':\'\')+\'></span><button>删除</button>\';\n    li.querySelector(\'span\').textContent=it.text;\n    li.querySelector(\'input\').onchange=()=>{it.done=!it.done;render();};\n    li.querySelector(\'button\').onclick=()=>{items.splice(i,1);render();};\n    list.append(li);\n  });\n}\ndocument.getElementById(\'f\').onsubmit=e=>{e.preventDefault();const t=document.getElementById(\'t\');items.push({text:t.value,done:false});t.value=\'\';render();};\nrender();\n</script>\n</body>\n</html>',
+        "qa": '# 测试报告\n\n**结论：通过**\n\n| 编号 | 场景 | 预期 | 结果 |\n|---|---|---|---|\n| 1 | 输入文字点添加 | 列表新增一项 | 通过 |\n| 2 | 勾选任务 | 文字划线 | 通过 |\n| 3 | 点删除 | 该项移除 | 通过 |\n| 4 | 刷新页面 | 任务保留 | 通过 |\n\n## 问题清单\n- 低：空格内容也能添加。\n\n## 修复建议\n- 提交时用 `t.value.trim()` 判断，为空则忽略。',
     },
 ]
 
 
 async def seed_demo_content(db: AsyncSession, account_id: str) -> None:
-    """Give the demo account a few finished sessions so visitors see real content."""
+    """Give the demo account one finished sample session so visitors see real content."""
     existing = await db.execute(select(Projects.id).where(Projects.user_id == account_id).limit(1))
     if existing.scalars().first():
         return
+    from services.sky import seed_default_roles, own_roles
+    await seed_default_roles(db, account_id)
+    roles = await own_roles(db, account_id)
     for spec in DEMO_PROJECTS:
-        project = Projects(
-            user_id=account_id,
-            title=spec["title"],
-            requirement=spec["requirement"],
-            status="done",
-            total_tokens=spec["tokens"],
-            current_version=1,
-        )
+        project = Projects(user_id=account_id, title=spec["title"], requirement=spec["requirement"],
+                           status="done", total_tokens=spec["tokens"], current_version=1)
         db.add(project)
         await db.commit()
-        for sender, msg_type, content in spec["messages"]:
-            db.add(Pool_messages(user_id=account_id, project_id=project.id, version=1, sender=sender,
-                                 msg_type=msg_type, subscribers=",".join(sorted({m[0] for m in spec["messages"]})),
-                                 content=content, prompt_tokens=0, completion_tokens=0))
-        for kind, path, content in (
-            ("doc", "PRD.md", spec["prd"]),
-            ("doc", "SystemDesign.md", spec["design"]),
-            ("code", "index.html", spec["code"]),
-        ):
-            db.add(Artifacts(user_id=account_id, project_id=project.id, version=1, kind=kind,
-                             path=path, content=content))
+        outputs = {
+            "PRD": ("已完成 PRD：添加、勾选完成、删除三项核心功能，刷新后数据保留。", "doc", "docs/PRD.md", spec["prd"]),
+            "SystemDesign": ("已完成设计：单文件 index.html，任务存于 localStorage，变更后重新渲染。", "doc", "docs/SystemDesign.md", spec["design"]),
+            "Code": ("已交付 index.html：支持添加、勾选完成和删除，预览自检通过。", "code", "index.html", spec["code"]),
+            "TestReport": (spec["qa"], "doc", "docs/TestReport.md", spec["qa"]),
+        }
+        def subs(t: str) -> str:
+            return ",".join(r.name for r in roles if t in [x.strip() for x in r.subscribe_types.split(",")])
+        db.add(Pool_messages(user_id=account_id, project_id=project.id, version=1, sender="User",
+                             msg_type="UserRequirement", subscribers=subs("UserRequirement"),
+                             content=spec["requirement"], prompt_tokens=0, completion_tokens=0))
+        plan = []
+        for r in roles:
+            if r.publish_type not in outputs:
+                continue
+            msg, kind, path, content = outputs[r.publish_type]
+            plan.append({"id": r.id, "name": r.name, "profile": r.profile})
+            db.add(Pool_messages(user_id=account_id, project_id=project.id, version=1, sender=r.name,
+                                 msg_type=r.publish_type, subscribers=subs(r.publish_type),
+                                 content=content if kind == "doc" else msg, prompt_tokens=0, completion_tokens=0))
+            db.add(Artifacts(user_id=account_id, project_id=project.id, version=1, kind=kind, path=path, content=content))
+        db.add(Run_plans(project_id=project.id, version=1, plan=json.dumps(plan, ensure_ascii=False)))
         await db.commit()
     logger.info("Seeded %s demo projects for account %s", len(DEMO_PROJECTS), account_id)

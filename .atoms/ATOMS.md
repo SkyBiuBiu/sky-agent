@@ -32,6 +32,14 @@ Sky Agent：多 Agent 协同站点（类 Atoms）。角色按 SOP 顺序（产�
 | 2026-10-09 | 演示账号 demo/demo123 固定在 account_id=sky-demo-account；只读守卫放在 get_current_user 依赖中（放行 /api/v1/sky/accounts/*） | Alex | 一处拦截即可覆盖所有写接口（含自动生成的实体路由），不给演示数据被覆盖留后门 |
 | 2026-10-09 | 演示账号预置 3 个已完成项目（待办清单、计算器含暗色模式、咖啡店落地页）及各自 PRD/设计/代码产物与协作消息 | Alex | 访客登录后立刻看到完整效果，不是空列表；仅在演示账号没有项目时才播种 |
 
+| 2026-10-10 | 预设角色存为全局只读模板（agent_roles.user_id=`__system_template__`），用户角色单独按 user_id 存储；新用户不再复制种子；/api/v1/sky/roles 返回 templates/mine/default_ids，/roles/{id}/copy 复制模板；建项目/迭代可传 role_ids，后端校验只能用模板或本人角色；同名时本人角色覆盖模板 | Alex | 修复越权并分离模板与自建角色 |
+| 2026-10-10 | 删除 agent_roles/projects/pool_messages/artifacts 四个无鉴权的 `/all` 路由 | Alex | 这些接口会返回所有账号的数据 |
+| 2026-10-10 | 拖拽排序不新增 sort_order 字段，直接重排「我的角色」已有的 sop_order 值（保持原有位置集合） | Alex | 显示顺序即执行顺序，避免两套顺序不一致 |
+| 2026-10-10 | 取消全局预设模板，角色全部为用户自有副本；默认 4 角色（产品经理→架构师→工程师→QA工程师）在注册/演示登录时幂等写入（按名称去重）；sop_order 每次读取归一为 1..n，拖拽直接写入 1..n | Alex | 用户要求只保留「我的角色」，显示顺序与执行顺序一致（取代此前模板相关决策） |
+| 2026-10-10 | 工作台与历史合并为单页（会话栏+工作区），执行顺序唯一来源为「我的角色」；每次运行写入 run_plans 快照，回看按快照显示；旧示例会话无快照时按消息发送者推断 | Alex | 回看不随之后角色调整变化 |
+
+| 预览 iframe 不加 allow-same-origin，改为 srcdoc 注入内存 Storage 垫片 | 保持沙箱隔离，避免存储访问白屏 |
+
 ## Constraints
 - 不使用平台内置模型，也不通过 SecretManager 收集 Key。
 - 使用 Atoms 登录体系；所有数据按 user_id 隔离。

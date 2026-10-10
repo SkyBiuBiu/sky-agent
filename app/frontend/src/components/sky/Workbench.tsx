@@ -1,10 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Plus, RotateCcw, Send, Square } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
+import {
+  AlertTriangle, ListOrdered, Menu, PanelLeftClose, PanelLeftOpen, Plus, RotateCcw, Search, Send, Square, Trash2,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import {
-  Artifact, PoolMessage, Project, Role, SESSION_KEY, STATUS_LABEL, api, client, errMsg, loadProjectData,
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  Artifact, PoolMessage, Project, Role, SESSION_KEY, STATUS_LABEL, api, client, deleteProject, errMsg, loadProjectData, roleLabel,
 } from '@/lib/sky';
 import { useAccount } from '@/contexts/AccountContext';
 import { ArtifactPanel, MessagePool } from './Panels';
@@ -12,18 +21,46 @@ import { ArtifactPanel, MessagePool } from './Panels';
 interface PlanItem { id: number; name: string; profile: string }
 interface StepRes { message: PoolMessage; total_tokens: number; preview_issues?: string[] }
 interface StartRes { project_id: number; version: number; plan: PlanItem[] }
+type Session = Project & { created_at?: string; updated_at?: string };
+type StepState = 'waiting' | 'running' | 'done' | 'stopped';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export default function Workbench({ sessionId, onSession, onDone }: {
+const STEP_STYLE: Record<StepState, { dot: string; label: string }> = {
+  waiting: { dot: 'bg-muted-foreground/30', label: '等待' },
+  running: { dot: 'animate-pulse bg-primary', label: '进行中' },
+  done: { dot: 'bg-primary', label: '完成' },
+  stopped: { dot: 'bg-destructive', label: '中断' },
+};
+
+function groupOf(s: Session): string {
+  const t = new Date(s.created_at || s.updated_at || 0).getTime();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (t >= today.getTime()) return '今天';
+  if (t >= today.getTime() - 6 * 86400000) return '最近 7 天';
+  return '更早';
+}
+
+export default function Workbench({ sessionId, onSession, onGoRoles, active }: {
   sessionId: number | null;
   onSession: (id: number | null) => void;
-  onDone: () => void;
+  onGoRoles: () => void;
+  active: boolean;
 }) {
   const { isDemo } = useAccount();
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [query, setQuery] = useState('');
+  const [collapsed, setCollapsed] = useState(false);
+  const [drawer, setDrawer] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<Session | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   const [input, setInput] = useState('');
   const [project, setProject] = useState<Project | null>(null);
+  const [plans, setPlans] = useState<Record<string, PlanItem[]>>({});
   const [plan, setPlan] = useState<PlanItem[]>([]);
+  const [roles, setRoles] = useState<PlanItem[] | null>(null);
   const [stepIdx, setStepIdx] = useState(-1);
   const [messages, setMessages] = useState<PoolMessage[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
@@ -33,32 +70,48 @@ export default function Workbench({ sessionId, onSession, onDone }: {
   const abortRef = useRef<AbortController | null>(null);
   const stoppedRef = useRef(false);
 
+  const loadSessions = useCallback(async () => {
+    const r = await client.entities.projects.query({ sort: '-id', limit: 200 });
+    setSessions((r.data?.items || []) as Session[]);
+  }, []);
+
   const refresh = useCallback(async (pid: number) => {
-    const [p, data] = await Promise.all([client.entities.projects.get({ id: String(pid) }), loadProjectData(pid)]);
+    const [p, data, pl] = await Promise.all([
+      client.entities.projects.get({ id: String(pid) }),
+      loadProjectData(pid),
+      api<{ plans: Record<string, PlanItem[]> }>(`/api/v1/sky/projects/${pid}/plans`).catch(() => ({ plans: {} })),
+    ]);
     setProject(p.data as Project);
     setMessages(data.messages);
     setArtifacts(data.artifacts);
+    setPlans(pl.plans);
   }, []);
 
   useEffect(() => {
-    (async () => {
-      await api('/api/v1/sky/roles/init');
-      const r = await client.entities.agent_roles.query({ sort: 'sop_order', limit: 100 });
-      setPlan(((r.data?.items || []) as Role[]).filter((x) => x.enabled).map(({ id, name, profile }) => ({ id, name, profile })));
-    })().catch((e) => setError(errMsg(e)));
-  }, []);
+    loadSessions().catch((e) => toast.error(errMsg(e)));
+  }, [loadSessions]);
+
+  // Re-read the role order whenever the workbench becomes visible again (it may have changed on the roles page).
+  useEffect(() => {
+    if (!active) return;
+    api<{ mine: Role[] }>('/api/v1/sky/roles')
+      .then((r) => setRoles(r.mine.filter((m) => m.enabled).map(({ id, name, profile }) => ({ id, name, profile }))))
+      .catch((e) => setError(errMsg(e)));
+  }, [active]);
 
   useEffect(() => {
     if (running) return;
+    setError('');
+    setStepIdx(-1);
     if (!sessionId) {
       setProject(null);
       setMessages([]);
       setArtifacts([]);
-      setStepIdx(-1);
+      setPlans({});
       return;
     }
     refresh(sessionId).catch((e) => {
-      setError(`会话加载失败：${errMsg(e)}`);
+      toast.error(`会话加载失败：${errMsg(e)}`);
       onSession(null);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -99,9 +152,10 @@ export default function Workbench({ sessionId, onSession, onDone }: {
       } catch (e) {
         setLive(null);
         if (stoppedRef.current) break;
-        setError(`${items[i].name}（${items[i].profile}）执行失败：${errMsg(e)}`);
+        setError(`${roleLabel(items[i].name)}（${items[i].profile}）执行失败：${errMsg(e)}`);
         await api(`/api/v1/sky/projects/${pid}/finish`, 'POST', { status: 'failed' }).catch(() => {});
         await refresh(pid).catch(() => {});
+        await loadSessions().catch(() => {});
         setRunning(false);
         return;
       }
@@ -112,15 +166,19 @@ export default function Workbench({ sessionId, onSession, onDone }: {
       setStepIdx(items.length);
     }
     await refresh(pid).catch(() => {});
+    await loadSessions().catch(() => {});
     setRunning(false);
-    onDone();
   }
 
   async function send() {
     const text = input.trim();
     if (!text) return;
     if (isDemo) {
-      setError('演示账号为只读账号，注册后即可创建并保存自己的项目');
+      setError('演示账号为只读账号，注册后即可创建并保存自己的会话');
+      return;
+    }
+    if (roles && roles.length === 0) {
+      setError('请先添加至少一个角色');
       return;
     }
     setError('');
@@ -132,6 +190,7 @@ export default function Workbench({ sessionId, onSession, onDone }: {
       setPlan(res.plan);
       onSession(res.project_id);
       await refresh(res.project_id);
+      await loadSessions().catch(() => {});
       await runFrom(res.project_id, res.plan, 0);
     } catch (e) {
       setError(errMsg(e));
@@ -149,97 +208,248 @@ export default function Workbench({ sessionId, onSession, onDone }: {
       setError(`中断请求失败：${errMsg(e)}`);
     }
     await refresh(project.id).catch(() => {});
+    await loadSessions().catch(() => {});
     setRunning(false);
-    onDone();
   }
+
+  async function confirmDelete() {
+    if (!pendingDelete) return;
+    const target = pendingDelete;
+    setDeleting(true);
+    try {
+      await deleteProject(target.id);
+      const rest = sessions.filter((s) => s.id !== target.id);
+      setSessions(rest);
+      if (sessionId === target.id) onSession(rest[0]?.id ?? null);
+      toast.success(`已删除「${target.title}」`);
+      setPendingDelete(null);
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  const pick = (id: number | null) => {
+    if (running) return;
+    onSession(id);
+    setDrawer(false);
+  };
 
   const version = project?.current_version || 1;
   const canRetry = !running && project && project.status === 'failed' && stepIdx >= 0 && stepIdx < plan.length;
 
-  return (
-    <div className="grid gap-4 lg:grid-cols-[320px_1fr_44%]">
-      <Card className="space-y-4 p-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{project ? '继续迭代' : '新会话'}</h2>
-          {project && (
-            <Button size="sm" variant="outline" disabled={running} onClick={() => onSession(null)}>
-              <Plus className="mr-1 h-3 w-3" /> 新会话
-            </Button>
-          )}
-        </div>
-        {project && (
-          <div className="rounded-md border p-2 text-xs">
-            <div className="truncate font-medium">{project.title}</div>
-            <div className="mt-1 flex justify-between text-muted-foreground">
-              <span>当前 v{version} · {STATUS_LABEL[project.status] || project.status}</span>
-              <span className="font-mono">{project.total_tokens} tokens</span>
-            </div>
-          </div>
-        )}
-        <Textarea
-          rows={5}
-          value={input}
-          disabled={running || isDemo}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send();
-          }}
-          placeholder={
-            isDemo
-              ? '演示账号为只读账号，可浏览下方示例项目；注册后即可创建自己的项目'
-              : project
-                ? '例如：加一个暗色模式切换按钮；把 PRD 改得更简洁'
-                : '例如：做一个待办清单网页 demo'
-          }
-        />
-        {running ? (
-          <Button className="w-full" variant="destructive" onClick={stop}>
-            <Square className="mr-1 h-4 w-4" /> 停止任务
-          </Button>
-        ) : (
-          <Button className="w-full" disabled={!input.trim() || isDemo} onClick={send}>
-            <Send className="mr-1 h-4 w-4" /> {project ? `发送并生成 v${version + 1}` : '启动 Agent 团队'}
-          </Button>
-        )}
-        {isDemo && (
-          <p className="rounded-md bg-muted p-2 text-xs text-muted-foreground">
-            演示账号为只读账号：可以直接查看右侧的协作消息与产物，或到「历史」中打开示例项目。注册自己的账号即可创建项目、配置模型并保存历史。
-          </p>
-        )}
-        <div>
-          <h3 className="mb-2 text-sm font-semibold">SOP 流水线</h3>
-          <ol className="space-y-2">
-            {plan.map((p, i) => (
-              <li key={p.id} className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${i === stepIdx && running ? 'border-primary bg-primary/5' : ''}`}>
-                <span className={`h-2 w-2 rounded-full ${i < stepIdx ? 'bg-green-600' : i === stepIdx && running ? 'animate-pulse bg-primary' : 'bg-muted-foreground/30'}`} />
-                <span className="font-medium">{p.name}</span>
-                <span className="text-xs text-muted-foreground">{p.profile}</span>
-              </li>
+  // Steps shown in the progress bar: live plan while running, otherwise the snapshot recorded for this version.
+  const steps = useMemo((): { item: PlanItem; state: StepState }[] => {
+    if (running) {
+      return plan.map((item, i) => ({ item, state: i < stepIdx ? 'done' : i === stepIdx ? 'running' : 'waiting' }));
+    }
+    if (!project) return (roles || []).map((item) => ({ item, state: 'waiting' }));
+    const current = messages.filter((m) => (m.version || 1) === version && m.sender !== 'User');
+    const snapshot = plans[String(version)]
+      ?? Array.from(new Map(current.map((m) => [m.sender, { id: m.id, name: m.sender, profile: '' }])).values());
+    const doneNames = new Set(current.map((m) => m.sender));
+    let stopMarked = false;
+    return snapshot.map((item) => {
+      if (doneNames.has(item.name)) return { item, state: 'done' as StepState };
+      if (!stopMarked && (project.status === 'interrupted' || project.status === 'failed')) {
+        stopMarked = true;
+        return { item, state: 'stopped' as StepState };
+      }
+      return { item, state: 'waiting' as StepState };
+    });
+  }, [running, plan, stepIdx, project, roles, messages, plans, version]);
+
+  const shown = sessions.filter((s) => !query.trim() || s.title.toLowerCase().includes(query.trim().toLowerCase()));
+  const groups = ['今天', '最近 7 天', '更早'].map((g) => [g, shown.filter((s) => groupOf(s) === g)] as const);
+
+  const sessionList = (
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      <Button onClick={() => pick(null)} disabled={running} className="w-full">
+        <Plus className="mr-1 h-4 w-4" />新建会话
+      </Button>
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索会话" className="pl-8" aria-label="搜索会话" />
+      </div>
+      {isDemo && <p className="text-xs text-muted-foreground">演示账号为只读账号，示例会话不可删除。</p>}
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
+        {sessions.length === 0 && <p className="px-1 text-sm text-muted-foreground">还没有会话。</p>}
+        {sessions.length > 0 && shown.length === 0 && <p className="px-1 text-sm text-muted-foreground">没有匹配的会话。</p>}
+        {groups.map(([g, list]) => list.length > 0 && (
+          <section key={g} className="space-y-1">
+            <h3 className="px-1 text-xs font-semibold text-muted-foreground">{g}</h3>
+            {list.map((s) => (
+              <div
+                key={s.id}
+                className={`group flex items-center gap-1 rounded-md border px-2 py-1.5 ${sessionId === s.id ? 'border-primary bg-primary/10' : 'border-transparent hover:bg-muted'}`}
+              >
+                <button
+                  type="button"
+                  onClick={() => pick(s.id)}
+                  disabled={running && sessionId !== s.id}
+                  className="min-w-0 flex-1 text-left disabled:cursor-not-allowed disabled:opacity-60"
+                  aria-current={sessionId === s.id}
+                >
+                  <div className="truncate text-sm font-medium">{s.title}</div>
+                  <div className="text-xs text-muted-foreground">v{s.current_version || 1} · {STATUS_LABEL[s.status] || s.status}</div>
+                </button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 w-7 shrink-0 p-0 text-muted-foreground hover:text-destructive"
+                  disabled={isDemo || (running && sessionId === s.id)}
+                  onClick={() => setPendingDelete(s)}
+                  aria-label={`删除会话 ${s.title}`}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
             ))}
-          </ol>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className={`grid gap-4 ${collapsed ? 'lg:grid-cols-[minmax(0,1fr)]' : 'lg:grid-cols-[minmax(240px,280px)_minmax(0,1fr)]'}`}>
+      {!collapsed && (
+        <Card className="hidden h-[calc(100vh-7rem)] min-w-0 p-3 lg:sticky lg:top-20 lg:block">{sessionList}</Card>
+      )}
+
+      <div className="min-w-0 space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" className="lg:hidden" onClick={() => setDrawer(true)}>
+            <Menu className="mr-1 h-4 w-4" />会话列表
+          </Button>
+          <Button variant="ghost" size="sm" className="hidden lg:inline-flex" onClick={() => setCollapsed((c) => !c)} aria-label={collapsed ? '展开会话栏' : '折叠会话栏'}>
+            {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+          </Button>
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate text-lg font-semibold">{project ? project.title : '新建会话'}</h2>
+            {project && (
+              <p className="text-xs text-muted-foreground">
+                当前 v{version} · {STATUS_LABEL[project.status] || project.status} · <span className="font-mono">{project.total_tokens} tokens</span>
+              </p>
+            )}
+          </div>
         </div>
-        {project?.status === 'interrupted' && !running && (
-          <p className="rounded-md bg-muted p-2 text-xs text-muted-foreground">任务已中断，已生成的消息和产物都已保存，可以继续发送消息迭代。</p>
-        )}
-        {error && (
-          <div className="space-y-2 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
-            <div className="flex gap-2"><AlertTriangle className="h-4 w-4 shrink-0" />{error}</div>
-            {canRetry && (
-              <Button size="sm" variant="outline" onClick={() => runFrom(project.id, plan, stepIdx)}>
-                <RotateCcw className="mr-1 h-3 w-3" /> 从失败步骤重试
+
+        <Card className="space-y-3 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold">
+              {running ? '执行进度' : project ? `v${version} 执行记录` : '本次将按以下顺序执行'}
+            </h3>
+            <button type="button" onClick={onGoRoles} className="flex items-center gap-1 text-xs text-primary hover:underline">
+              <ListOrdered className="h-3 w-3" />调整角色顺序
+            </button>
+          </div>
+          {roles && roles.length === 0 && !project ? (
+            <div className="flex flex-wrap items-center gap-2 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+              请先添加至少一个角色。
+              <Button size="sm" variant="outline" onClick={onGoRoles}>去添加角色</Button>
+            </div>
+          ) : steps.length === 0 ? (
+            <p className="text-xs text-muted-foreground">这次运行没有记录到角色。</p>
+          ) : (
+            <ol className="flex flex-wrap items-center gap-2" aria-label="执行进度">
+              {steps.map(({ item, state }, i) => (
+                <li key={`${item.id}-${i}`} className="flex items-center gap-2">
+                  {i > 0 && <span className="text-muted-foreground" aria-hidden>→</span>}
+                  <span className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs ${state === 'running' ? 'border-primary bg-primary/10' : 'bg-background'}`}>
+                    <span className={`h-2 w-2 rounded-full ${STEP_STYLE[state].dot}`} />
+                    <span className="font-medium">{roleLabel(item.name)}</span>
+                    <span className="text-muted-foreground">{STEP_STYLE[state].label}</span>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </Card>
+
+        <Card className="space-y-3 p-4">
+          <Textarea
+            rows={3}
+            value={input}
+            disabled={running || isDemo}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send();
+            }}
+            placeholder={
+              isDemo
+                ? '演示账号为只读账号，可在左侧打开示例会话查看；注册后即可创建自己的会话'
+                : project
+                  ? '继续迭代，例如：加一个暗色模式切换按钮；把 PRD 改得更简洁（Ctrl/⌘ + Enter 发送）'
+                  : '描述你的需求，例如：做一个待办清单网页 demo（Ctrl/⌘ + Enter 发送）'
+            }
+          />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {project?.status === 'interrupted' && !running && (
+              <p className="mr-auto text-xs text-muted-foreground">任务已中断，已生成的消息和产物都已保存，可以继续发送消息迭代。</p>
+            )}
+            {running ? (
+              <Button variant="destructive" onClick={stop}><Square className="mr-1 h-4 w-4" />停止任务</Button>
+            ) : (
+              <Button disabled={!input.trim() || isDemo} onClick={send}>
+                <Send className="mr-1 h-4 w-4" />{project ? `发送并生成 v${version + 1}` : '启动 Agent 团队'}
               </Button>
             )}
           </div>
-        )}
-      </Card>
-      <Card className="p-4">
-        <h2 className="mb-3 text-lg font-semibold">会话与共享消息池</h2>
-        <MessagePool messages={messages} live={live} />
-      </Card>
-      <Card className="p-4">
-        <h2 className="mb-3 text-lg font-semibold">产物</h2>
-        <ArtifactPanel artifacts={artifacts} name={`sky-project-${project?.id ?? 'new'}`} />
-      </Card>
+          {error && (
+            <div className="space-y-2 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+              <div className="flex gap-2"><AlertTriangle className="h-4 w-4 shrink-0" />{error}</div>
+              {canRetry && (
+                <Button size="sm" variant="outline" onClick={() => runFrom(project.id, plan, stepIdx)}>
+                  <RotateCcw className="mr-1 h-3 w-3" />从失败步骤重试
+                </Button>
+              )}
+            </div>
+          )}
+        </Card>
+
+        <div className="grid gap-4 2xl:grid-cols-2">
+          <Card className="min-w-0 p-4">
+            <h3 className="mb-3 font-semibold">对话与共享消息池</h3>
+            <MessagePool messages={messages} live={live} />
+          </Card>
+          <Card className="min-w-0 p-4">
+            <h3 className="mb-3 font-semibold">产物</h3>
+            <ArtifactPanel artifacts={artifacts} name={`sky-project-${project?.id ?? 'new'}`} />
+          </Card>
+        </div>
+      </div>
+
+      <Sheet open={drawer} onOpenChange={setDrawer}>
+        <SheetContent side="left" className="flex w-80 flex-col">
+          <SheetHeader><SheetTitle>会话</SheetTitle></SheetHeader>
+          <div className="min-h-0 flex-1">{sessionList}</div>
+        </SheetContent>
+      </Sheet>
+
+      <AlertDialog open={!!pendingDelete} onOpenChange={(o) => !o && setPendingDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除这个会话？</AlertDialogTitle>
+            <AlertDialogDescription>
+              将永久删除「{pendingDelete?.title}」及其全部对话消息和产物，删除后无法恢复。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleting}
+              onClick={(e) => {
+                e.preventDefault();
+                confirmDelete();
+              }}
+            >
+              {deleting ? '删除中…' : '确认删除'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

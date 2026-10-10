@@ -79,7 +79,7 @@ export default function LoginPage() {
           产出 PRD、系统设计和可直接下载的代码。使用你自己的 OpenAI 兼容 API Key。
         </p>
         <div className="mt-8 flex flex-wrap items-center gap-2 text-sm">
-          {['用户需求', 'Emma · 产品经理', 'Bob · 架构师', 'Alex · 工程师', '代码产物'].map((s, i) => (
+          {['用户需求', '产品经理', '架构师', '工程师', '代码产物'].map((s, i) => (
             <span key={s} className="flex items-center gap-2">
               {i > 0 && <span className="text-muted-foreground">→</span>}
               <span className="flex items-center gap-1 rounded-md border bg-card px-3 py-2">

@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
@@ -16,6 +16,9 @@ from models.llm_configs import Llm_configs
 from models.projects import Projects
 from models.pool_messages import Pool_messages
 from models.artifacts import Artifacts
+from models.agent_roles import Agent_roles
+from models.run_plans import Run_plans
+import json
 from services import sky
 
 logger = logging.getLogger(__name__)
@@ -33,6 +36,7 @@ class ConfigIn(BaseModel):
 
 class ProjectIn(BaseModel):
     requirement: str
+    role_ids: Optional[List[int]] = None  # selected SOP roles (templates and/or own); default selection if omitted
 
 
 class StepIn(BaseModel):
@@ -57,15 +61,28 @@ async def _own_project(db: AsyncSession, project_id: int, user_id: str) -> Proje
     return project
 
 
-async def _plan(db: AsyncSession, user_id: str) -> List[Dict[str, Any]]:
-    roles = [r for r in await sky.ensure_roles(db, user_id) if r.enabled]
-    if not roles:
-        raise HTTPException(status_code=400, detail="没有启用的 Agent 角色")
+async def _plan(db: AsyncSession, user_id: str, role_ids: Optional[List[int]] = None) -> List[Dict[str, Any]]:
+    enabled = sky.enabled_roles(await sky.normalize_order(db, user_id))
+    if not enabled:
+        raise HTTPException(status_code=400, detail="请先在「Agent 角色」中添加至少一个角色")
+    if role_ids:
+        allowed = {r.id: r for r in enabled}
+        if any(i not in allowed for i in role_ids):
+            raise HTTPException(status_code=403, detail="所选角色不存在、已停用或无权使用")
+        roles = sorted({i: allowed[i] for i in role_ids}.values(), key=sky.order_key)
+    else:
+        roles = enabled
     return [{"id": r.id, "name": r.name, "profile": r.profile} for r in roles]
 
 
+def _role_out(r: Agent_roles) -> Dict[str, Any]:
+    return {"id": r.id, "name": r.name, "profile": r.profile, "goal": r.goal, "system_prompt": r.system_prompt,
+            "subscribe_types": r.subscribe_types, "publish_type": r.publish_type, "artifact_kind": r.artifact_kind,
+            "sop_order": r.sop_order, "enabled": r.enabled}
+
+
 async def _post_user_message(db: AsyncSession, user_id: str, project: Projects, content: str) -> None:
-    roles = await sky.ensure_roles(db, user_id)
+    roles = sky.enabled_roles(await sky.own_roles(db, user_id))
     subs = [r.name for r in roles if r.enabled and "UserRequirement" in sky.split_types(r.subscribe_types)]
     db.add(Pool_messages(user_id=user_id, project_id=project.id, version=project.current_version or 1,
                          sender="User", msg_type="UserRequirement", subscribers=",".join(subs),
@@ -113,8 +130,34 @@ async def test_config(data: ConfigIn, user: UserResponse = Depends(get_current_u
 
 @router.get("/roles/init")
 async def init_roles(user: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    roles = await sky.ensure_roles(db, user.id)
+    roles = await sky.own_roles(db, user.id)
     return {"count": len(roles)}
+
+
+@router.get("/roles")
+async def list_roles(user: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """The caller's roles in execution order; position is the 1-based place among enabled roles."""
+    roles = await sky.normalize_order(db, user.id)
+    pos = {r.id: i for i, r in enumerate(sky.enabled_roles(roles), start=1)}
+    return {"mine": [{**_role_out(r), "position": pos.get(r.id)} for r in roles],
+            "default_ids": list(pos)}
+
+
+class ReorderIn(BaseModel):
+    ids: List[int]
+
+
+@router.post("/roles/reorder")
+async def reorder_roles(data: ReorderIn, user: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Persist the drag order of the caller's roles as SOP positions 1..n."""
+    mine = await sky.own_roles(db, user.id)
+    by_id = {r.id: r for r in mine}
+    if len(set(data.ids)) != len(data.ids) or set(data.ids) != set(by_id):
+        raise HTTPException(status_code=403, detail="只能调整自己全部角色的顺序")
+    for i, rid in enumerate(data.ids, start=1):
+        by_id[rid].sop_order = i
+    await db.commit()
+    return {"ids": data.ids}
 
 
 @router.post("/projects")
@@ -124,12 +167,13 @@ async def create_project(data: ProjectIn, user: UserResponse = Depends(get_curre
         raise HTTPException(status_code=400, detail="需求不能为空")
     if not await sky.get_config(db, user.id):
         raise HTTPException(status_code=400, detail="请先在「模型配置」中填写 API Key")
-    plan = await _plan(db, user.id)
+    plan = await _plan(db, user.id, data.role_ids)
     project = Projects(user_id=user.id, title=req[:40], requirement=req, status="running",
                        total_tokens=0, current_version=1)
     db.add(project)
     await db.commit()
     await _post_user_message(db, user.id, project, req)
+    db.add(Run_plans(project_id=project.id, version=1, plan=json.dumps(plan, ensure_ascii=False)))
     await db.commit()
     return {"project_id": project.id, "version": 1, "plan": plan}
 
@@ -142,11 +186,12 @@ async def iterate(project_id: int, data: ProjectIn, user: UserResponse = Depends
     if not content:
         raise HTTPException(status_code=400, detail="消息不能为空")
     project = await _own_project(db, project_id, user.id)
-    plan = await _plan(db, user.id)
+    plan = await _plan(db, user.id, data.role_ids)
     project.current_version = (project.current_version or 1) + 1
     project.status = "running"
     await _post_user_message(db, user.id, project, content)
     version = project.current_version
+    db.add(Run_plans(project_id=project_id, version=version, plan=json.dumps(plan, ensure_ascii=False)))
     await db.commit()
     return {"project_id": project_id, "version": version, "plan": plan}
 
@@ -181,7 +226,7 @@ async def run_step(project_id: int, data: StepIn, user: UserResponse = Depends(g
     if project.status == "interrupted":
         raise HTTPException(status_code=409, detail="任务已中断")
     version = project.current_version or 1
-    roles = await sky.ensure_roles(db, user.id)
+    roles = await sky.own_roles(db, user.id)
     enabled = [r for r in roles if r.enabled]
     role = next((r for r in enabled if r.id == data.role_id), None)
     if not role and data.step is not None and 0 <= data.step < len(enabled):
@@ -241,7 +286,7 @@ async def repair(project_id: int, data: StepIn, user: UserResponse = Depends(get
     if project.status == "interrupted":
         raise HTTPException(status_code=409, detail="任务已中断")
     version = project.current_version or 1
-    roles = await sky.ensure_roles(db, user.id)
+    roles = await sky.own_roles(db, user.id)
     role = next((r for r in roles if r.id == data.role_id and r.artifact_kind == "code"), None)
     if not role:
         raise HTTPException(status_code=404, detail="工程师角色不存在")
@@ -282,6 +327,33 @@ async def repair(project_id: int, data: StepIn, user: UserResponse = Depends(get
     project.total_tokens = (project.total_tokens or 0) + pt + ct
     await db.commit()
     return {"fixed": not new_issues, "preview_issues": new_issues, "sender": role_name}
+
+
+@router.get("/projects/{project_id}/plans")
+async def project_plans(project_id: int, user: UserResponse = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Role/order snapshots recorded when each version of this session started."""
+    await _own_project(db, project_id, user.id)
+    res = await db.execute(select(Run_plans).where(Run_plans.project_id == project_id)
+                           .order_by(Run_plans.version, Run_plans.id))
+    out: Dict[int, Any] = {}
+    for r in res.scalars().all():
+        out[r.version] = json.loads(r.plan or "[]")
+    return {"plans": out}
+
+
+@router.delete("/projects/{project_id}")
+async def delete_project(project_id: int, user: UserResponse = Depends(get_current_user),
+                         db: AsyncSession = Depends(get_db)):
+    """Delete a saved session together with its pool messages and artifacts."""
+    project = await _own_project(db, project_id, user.id)
+    await db.execute(delete(Pool_messages).where(Pool_messages.project_id == project_id,
+                                                 Pool_messages.user_id == user.id))
+    await db.execute(delete(Run_plans).where(Run_plans.project_id == project_id))
+    await db.execute(delete(Artifacts).where(Artifacts.project_id == project_id,
+                                             Artifacts.user_id == user.id))
+    await db.delete(project)
+    await db.commit()
+    return {"deleted": True, "project_id": project_id}
 
 
 @router.post("/projects/{project_id}/cancel")

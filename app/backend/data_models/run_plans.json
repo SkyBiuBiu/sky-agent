@@ -1,0 +1,25 @@
+{
+    "title": "run_plans",
+    "type": "object",
+    "properties": {
+        "id": {
+            "type": "integer"
+        },
+        "project_id": {
+            "type": "integer"
+        },
+        "version": {
+            "type": "integer"
+        },
+        "plan": {
+            "type": "string",
+            "description": "JSON array of {id,name,profile} in execution order at run start"
+        }
+    },
+    "required": [
+        "id",
+        "project_id",
+        "version",
+        "plan"
+    ]
+}

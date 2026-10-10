@@ -68,7 +68,7 @@ export const errMsg = (e: any) =>
 
 export async function api<T>(
   url: string,
-  method: 'GET' | 'POST' = 'GET',
+  method: 'GET' | 'POST' | 'DELETE' = 'GET',
   data: object = {},
   signal?: AbortSignal,
 ): Promise<T> {
@@ -78,11 +78,20 @@ export async function api<T>(
 
 export const SESSION_KEY = 'sky_active_session';
 
+/** Delete a saved session together with its pool messages and artifacts. */
+export const deleteProject = (projectId: number) =>
+  api<{ deleted: boolean; project_id: number }>(`/api/v1/sky/projects/${projectId}`, 'DELETE');
+
 const ERROR_HOOK = `<script>(function(){function s(m){try{parent.postMessage({skyPreviewError:String(m)},'*')}catch(e){}}
 window.addEventListener('error',function(e){s(e.message+(e.lineno?' (行 '+e.lineno+')':''))});
 window.addEventListener('unhandledrejection',function(e){s('Promise: '+(e.reason&&e.reason.message||e.reason))});})();</script>`;
 
-/** Build a self-contained preview document: inline local css/js and inject a runtime error hook. */
+/** Sandboxed iframe (no allow-same-origin) throws on Web Storage access; fall back to in-memory storage. */
+const STORAGE_SHIM = `<script>(function(){['localStorage','sessionStorage'].forEach(function(n){var ok=false;try{var s=window[n];var k='__sky_t';s.setItem(k,'1');s.removeItem(k);ok=true}catch(e){}if(ok)return;
+var m=new Map();var impl={getItem:function(k){k=String(k);return m.has(k)?m.get(k):null},setItem:function(k,v){m.set(String(k),String(v))},removeItem:function(k){m.delete(String(k))},clear:function(){m.clear()},key:function(i){var a=Array.from(m.keys());return i>=0&&i<a.length?a[i]:null}};
+Object.defineProperty(impl,'length',{get:function(){return m.size}});try{Object.defineProperty(window,n,{value:impl,configurable:true})}catch(e){}});})();</script>`;
+
+/** Build a self-contained preview document: inline local css/js and inject storage shim + runtime error hook. Downloads use raw files. */
 export function buildPreview(files: Artifact[]): string | null {
   const entry = files.find((f) => /(^|\/)index\.html?$/i.test(f.path)) || files.find((f) => /\.html?$/i.test(f.path));
   if (!entry) return null;
@@ -96,11 +105,33 @@ export function buildPreview(files: Artifact[]): string | null {
       const c = byName.get(p.replace(/^\.?\//, ''));
       return c !== undefined ? `<script${a}${b}>${c.replace(/<\/script>/gi, '<\\/script>')}</script>` : m;
     });
-  html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (h) => h + ERROR_HOOK) : ERROR_HOOK + html;
+  const inject = STORAGE_SHIM + ERROR_HOOK;
+  html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (h) => h + inject) : inject + html;
   return html;
 }
 
 export const ROLE_TYPES = ['UserRequirement', 'PRD', 'SystemDesign', 'Code'];
+
+/** 旧版本历史数据使用英文人名，统一映射为中文职位名展示。 */
+const LEGACY_ROLE_NAMES: Record<string, string> = {
+  Emma: '产品经理',
+  Bob: '架构师',
+  Alex: '工程师',
+  Sarah: 'SEO 专家',
+  David: '数据分析师',
+  Mike: '项目经理',
+};
+
+export const roleLabel = (name: string) => LEGACY_ROLE_NAMES[name?.trim()] ?? name;
+
+/** 订阅者字段可能是逗号分隔的多个角色名，逐个映射。 */
+export const roleListLabel = (names: string) =>
+  (names || '')
+    .split(/[,，]/)
+    .map((n) => n.trim())
+    .filter(Boolean)
+    .map(roleLabel)
+    .join('、');
 
 export const typeColor = (t: string) =>
   ({

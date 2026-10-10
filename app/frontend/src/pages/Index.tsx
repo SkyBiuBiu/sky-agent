@@ -6,12 +6,11 @@ import { useAccount } from '@/contexts/AccountContext';
 import LoginPage from '@/pages/LoginPage';
 import Workbench from '@/components/sky/Workbench';
 import AccountPanel from '@/components/sky/AccountPanel';
-import { ConfigPanel, HistoryPanel, RolesPanel } from '@/components/sky/Settings';
+import { ConfigPanel, RolesPanel } from '@/components/sky/Settings';
 
 const TABS = [
   ['work', '工作台'],
   ['roles', '角色'],
-  ['history', '历史'],
   ['config', '模型配置'],
   ['account', '我的账号'],
 ] as const;
@@ -19,12 +18,28 @@ type Tab = (typeof TABS)[number][0];
 
 export default function Index() {
   const { status, user, isDemo, signOut } = useAccount();
-  const [tab, setTab] = useState<Tab>('work');
-  const [historyKey, setHistoryKey] = useState(0);
-  const [sessionId, setSessionId] = useState<number | null>(() => {
-    const v = Number(localStorage.getItem(SESSION_KEY));
-    return v > 0 ? v : null;
-  });
+  const readUrl = () => {
+    const q = new URLSearchParams(window.location.search);
+    const t = q.get('tab');
+    const tabOk = TABS.some(([k]) => k === t) ? (t as Tab) : 'work'; // legacy ?tab=history falls back to the workbench
+    const sid = Number(q.get('session')) || Number(localStorage.getItem(SESSION_KEY)) || 0;
+    return { tab: tabOk, session: sid > 0 ? sid : null };
+  };
+  const [tab, setTabState] = useState<Tab>(() => readUrl().tab);
+  const [sessionId, setSessionId] = useState<number | null>(() => readUrl().session);
+
+  // Keep the address bar in sync so a refresh restores the same tab and session.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    q.delete('tab');
+    q.delete('session');
+    if (tab !== 'work') q.set('tab', tab);
+    if (sessionId) q.set('session', String(sessionId));
+    const qs = q.toString();
+    window.history.replaceState(null, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`);
+  }, [tab, sessionId]);
+
+  const setTab = (t: Tab) => setTabState(t);
   const changeSession = (id: number | null) => {
     setSessionId(id);
     if (id) localStorage.setItem(SESSION_KEY, String(id));
@@ -43,10 +58,15 @@ export default function Index() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-10 border-b bg-background/95">
-        <div className="mx-auto flex h-14 max-w-[1600px] items-center gap-6 px-4">
-          <div className="flex items-center gap-2 font-semibold">
+        <div className="mx-auto flex h-14 w-full max-w-[2200px] items-center gap-6 px-4 sm:px-6">
+          <button
+            type="button"
+            onClick={() => setTab('work')}
+            className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 font-semibold transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label="返回主页"
+          >
             <Network className="h-5 w-5 text-primary" />Sky Agent
-          </div>
+          </button>
           {status === 'in' && (
             <nav className="flex gap-1">
               {TABS.map(([k, label]) => (
@@ -77,7 +97,7 @@ export default function Index() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-[1600px] p-4">
+      <main className="mx-auto w-full max-w-[2200px] p-4 sm:p-6">
         {status === 'loading' && <p className="py-16 text-center text-sm text-muted-foreground">正在校验登录状态…</p>}
         {status === 'out' && <LoginPage />}
         {status === 'in' && (
@@ -88,18 +108,9 @@ export default function Index() {
               </p>
             )}
             <div className={tab === 'work' ? '' : 'hidden'}>
-              <Workbench sessionId={sessionId} onSession={changeSession} onDone={() => setHistoryKey((k) => k + 1)} />
+              <Workbench sessionId={sessionId} onSession={changeSession} onGoRoles={() => setTab('roles')} active={tab === 'work'} />
             </div>
             {tab === 'roles' && <RolesPanel />}
-            {tab === 'history' && (
-              <HistoryPanel
-                key={historyKey}
-                onContinue={(id) => {
-                  changeSession(id);
-                  setTab('work');
-                }}
-              />
-            )}
             {tab === 'config' && <ConfigPanel />}
             {tab === 'account' && <AccountPanel />}
           </>
