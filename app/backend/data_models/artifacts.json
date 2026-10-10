@@ -1,0 +1,36 @@
+{
+    "title": "artifacts",
+    "type": "object",
+    "properties": {
+        "id": {
+            "type": "integer",
+            "autoincrement": true
+        },
+        "user_id": {
+            "type": "string"
+        },
+        "project_id": {
+            "type": "integer"
+        },
+        "version": {
+            "type": "integer"
+        },
+        "kind": {
+            "type": "string"
+        },
+        "path": {
+            "type": "string"
+        },
+        "content": {
+            "type": "string"
+        }
+    },
+    "required": [
+        "id",
+        "user_id",
+        "project_id",
+        "kind",
+        "path",
+        "content"
+    ]
+}

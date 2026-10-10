@@ -1,0 +1,53 @@
+{
+    "title": "agent_roles",
+    "type": "object",
+    "properties": {
+        "id": {
+            "type": "integer",
+            "autoincrement": true
+        },
+        "user_id": {
+            "type": "string"
+        },
+        "name": {
+            "type": "string"
+        },
+        "profile": {
+            "type": "string"
+        },
+        "goal": {
+            "type": "string"
+        },
+        "system_prompt": {
+            "type": "string"
+        },
+        "subscribe_types": {
+            "type": "string"
+        },
+        "publish_type": {
+            "type": "string"
+        },
+        "artifact_kind": {
+            "type": "string"
+        },
+        "sop_order": {
+            "type": "integer"
+        },
+        "enabled": {
+            "type": "boolean"
+        }
+    },
+    "required": [
+        "id",
+        "user_id",
+        "name",
+        "profile",
+        "goal",
+        "system_prompt",
+        "subscribe_types",
+        "publish_type",
+        "artifact_kind",
+        "sop_order",
+        "enabled"
+    ]
+}

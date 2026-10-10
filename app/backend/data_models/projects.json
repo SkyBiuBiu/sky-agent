@@ -1,0 +1,36 @@
+{
+    "title": "projects",
+    "type": "object",
+    "properties": {
+        "id": {
+            "type": "integer",
+            "autoincrement": true
+        },
+        "user_id": {
+            "type": "string"
+        },
+        "title": {
+            "type": "string"
+        },
+        "requirement": {
+            "type": "string"
+        },
+        "status": {
+            "type": "string"
+        },
+        "total_tokens": {
+            "type": "integer"
+        },
+        "current_version": {
+            "type": "integer"
+        }
+    },
+    "required": [
+        "id",
+        "user_id",
+        "title",
+        "requirement",
+        "status",
+        "total_tokens"
+    ]
+}

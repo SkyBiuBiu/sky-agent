@@ -1,0 +1,51 @@
+{
+  "status": "partial_success",
+  "results": [
+    {
+      "status": "success",
+      "filename": "home-requirement-input.png",
+      "url": "https://mgx-backend-cdn.metadl.com/generate/images/1626012/2026-10-09/ycxgcfqcalga/home-requirement-input.png",
+      "path": "https://mgx-backend-cdn.metadl.com/generate/images/1626012/2026-10-09/ycxgcfqcalga/home-requirement-input.png",
+      "absolute_path": "https://mgx-backend-cdn.metadl.com/generate/images/1626012/2026-10-09/ycxgcfqcalga/home-requirement-input.png"
+    },
+    {
+      "status": "success",
+      "filename": "collaboration-process.png",
+      "url": "https://mgx-backend-cdn.metadl.com/generate/images/1626012/2026-10-09/ycxgc7icalia/collaboration-process.png",
+      "path": "https://mgx-backend-cdn.metadl.com/generate/images/1626012/2026-10-09/ycxgc7icalia/collaboration-process.png",
+      "absolute_path": "https://mgx-backend-cdn.metadl.com/generate/images/1626012/2026-10-09/ycxgc7icalia/collaboration-process.png"
+    },
+    {
+      "status": "success",
+      "filename": "message-pool.png",
+      "url": "https://mgx-backend-cdn.metadl.com/generate/images/1626012/2026-10-09/ycxgdmacalhq/message-pool.png",
+      "path": "https://mgx-backend-cdn.metadl.com/generate/images/1626012/2026-10-09/ycxgdmacalhq/message-pool.png",
+      "absolute_path": "https://mgx-backend-cdn.metadl.com/generate/images/1626012/2026-10-09/ycxgdmacalhq/message-pool.png"
+    },
+    {
+      "status": "success",
+      "filename": "artifact-preview.png",
+      "url": "https://mgx-backend-cdn.metadl.com/generate/images/1626012/2026-10-09/ycxgdzacalha/artifact-preview.png",
+      "path": "https://mgx-backend-cdn.metadl.com/generate/images/1626012/2026-10-09/ycxgdzacalha/artifact-preview.png",
+      "absolute_path": "https://mgx-backend-cdn.metadl.com/generate/images/1626012/2026-10-09/ycxgdzacalha/artifact-preview.png"
+    },
+    {
+      "status": "success",
+      "filename": "custom-roles.png",
+      "url": "https://mgx-backend-cdn.metadl.com/generate/images/1626012/2026-10-09/ycxgegacalgq/custom-roles.png",
+      "path": "https://mgx-backend-cdn.metadl.com/generate/images/1626012/2026-10-09/ycxgegacalgq/custom-roles.png",
+      "absolute_path": "https://mgx-backend-cdn.metadl.com/generate/images/1626012/2026-10-09/ycxgegacalgq/custom-roles.png"
+    },
+    {
+      "status": "success",
+      "filename": "project-history.png",
+      "url": "https://mgx-backend-cdn.metadl.com/generate/images/1626012/2026-10-09/ycxgesycalga/project-history.png",
+      "path": "https://mgx-backend-cdn.metadl.com/generate/images/1626012/2026-10-09/ycxgesycalga/project-history.png",
+      "absolute_path": "https://mgx-backend-cdn.metadl.com/generate/images/1626012/2026-10-09/ycxgesycalga/project-history.png"
+    }
+  ],
+  "success_count": 6,
+  "failed_count": 1,
+  "running_count": 0,
+  "message": "Generated 6/7 images total"
+}

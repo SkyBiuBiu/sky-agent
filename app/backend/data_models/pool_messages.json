@@ -1,0 +1,48 @@
+{
+    "title": "pool_messages",
+    "type": "object",
+    "properties": {
+        "id": {
+            "type": "integer",
+            "autoincrement": true
+        },
+        "user_id": {
+            "type": "string"
+        },
+        "project_id": {
+            "type": "integer"
+        },
+        "version": {
+            "type": "integer"
+        },
+        "sender": {
+            "type": "string"
+        },
+        "msg_type": {
+            "type": "string"
+        },
+        "subscribers": {
+            "type": "string"
+        },
+        "content": {
+            "type": "string"
+        },
+        "prompt_tokens": {
+            "type": "integer"
+        },
+        "completion_tokens": {
+            "type": "integer"
+        }
+    },
+    "required": [
+        "id",
+        "user_id",
+        "project_id",
+        "sender",
+        "msg_type",
+        "subscribers",
+        "content",
+        "prompt_tokens",
+        "completion_tokens"
+    ]
+}
