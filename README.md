@@ -134,19 +134,57 @@ pnpm run lint && pnpm run build
 ```text
 .
 ├── README.md
-├── docs/images/                  # README 界面截图
+├── .env.example                    # 环境变量示例（仅变量名，无真实值）
+├── .gitignore                      # 排除 node_modules、dist、.env 等
+├── .gitattributes                  # 图片等二进制文件走 Git LFS
+├── docs/images/                    # README 界面截图（6 张真实截图）
 └── app/
-    ├── start_app_v2.sh           # 本地启动脚本
-    ├── backend/                  # FastAPI + Atoms Cloud
-    │   ├── routers/sky.py        # 核心接口
-    │   ├── services/sky.py       # 角色编排、模型调用、产物解析
-    │   └── services/accounts.py  # 账号与演示数据
-    └── frontend/                 # Vite + React + TypeScript + shadcn/ui
+    ├── start_app_v2.sh             # 本地一键启动脚本
+    ├── backend/                    # 后端：FastAPI + Atoms Cloud
+    │   ├── main.py                 # 应用入口，自动注册路由
+    │   ├── core/                   # 配置、数据库连接、鉴权、密钥脱敏
+    │   ├── data_models/            # 数据表结构定义（JSON Schema）
+    │   ├── models/                 # ORM 模型：角色、会话、消息、产物、模型配置、运行快照、账号
+    │   ├── routers/
+    │   │   ├── sky.py              # 核心接口：运行/中断、会话、角色排序、模型配置、运行快照
+    │   │   ├── accounts.py         # 登录、注册、修改密码、演示账号
+    │   │   └── ...                 # 各数据表的通用 CRUD 接口
+    │   ├── services/
+    │   │   ├── sky.py              # 多 Agent 引擎：默认角色、消息池订阅、LLM 客户端、产物解析
+    │   │   ├── accounts.py         # 账号体系、默认角色播种、演示数据
+    │   │   ├── run_plans.py        # 运行快照（执行进度条数据）
+    │   │   └── ...                 # 各数据表的数据访问层
+    │   ├── alembic/                # 数据库迁移
+    │   └── requirements.txt        # Python 依赖
+    └── frontend/                   # 前端：Vite + React + TypeScript + shadcn/ui
+        ├── index.html
+        ├── package.json
         └── src/
-            ├── components/sky/   # 工作台、消息池、产物、角色、配置
-            ├── lib/sky.ts        # 数据访问、预览组装（含存储垫片）、下载
-            └── pages/Index.tsx   # 主页面
+            ├── App.tsx             # 路由入口
+            ├── pages/
+            │   ├── Index.tsx       # 主页面：工作台 / 角色 / 模型配置 / 我的账号
+            │   └── LoginPage.tsx   # 登录、注册、演示账号一键登录
+            ├── components/sky/
+            │   ├── Workbench.tsx   # 工作台：会话栏、进度条、对话流、中断
+            │   ├── Panels.tsx      # 消息池、产物预览（沙箱）、版本切换、下载
+            │   ├── RolesPanel.tsx  # 我的角色：左右分栏、拖拽排序
+            │   ├── Settings.tsx    # 模型配置与连通性测试
+            │   └── AccountPanel.tsx# 我的账号、修改密码
+            ├── components/ui/      # shadcn/ui 基础组件
+            ├── contexts/           # 账号登录态
+            └── lib/
+                ├── sky.ts          # 接口调用、类型、预览组装（含存储垫片）、下载
+                └── accounts.ts     # 账号接口与 Token 管理
 ```
+
+| 模块 | 位置 | 职责 |
+| --- | --- | --- |
+| 多 Agent 引擎 | `backend/services/sky.py` | 按「我的角色」顺序调度，经共享消息池传递产出 |
+| 角色 | `services/sky.py`、`components/sky/RolesPanel.tsx` | 默认 4 个角色定义、增删改与拖拽排序 |
+| LLM 客户端 | `backend/services/sky.py` | 调用用户配置的 OpenAI 兼容接口，支持中断 |
+| 接口路由 | `backend/routers/sky.py`、`routers/accounts.py` | 运行、会话、角色、配置、账号等 API |
+| 前端页面 | `frontend/src/pages/`、`components/sky/` | 登录、工作台、消息池、产物预览、角色、配置 |
+| 接口调用 | `frontend/src/lib/sky.ts`、`lib/accounts.ts` | 封装后端请求、预览组装与下载 |
 
 ## 常见问题
 

@@ -31,6 +31,7 @@ last_updated: 2026-10-09T10:30:00Z
 | T16 | 数据按账号隔离校验 + 端到端验证 + 推送 main + 同步上下文 | Alex | done | T15 |
 
 ## Progress Log
+- 已推送 main（764ac5b）：README 重新排版（居中头部+徽章+主图、功能表格、HTML 两列预览、折叠 FAQ），截图换为 6 张 2x JPG 实拍图，删除旧 png。
 - 已推送 GitHub main（3520a42，快进合并）：README 按现有功能重写，docs/images 换成 6 张 Playwright 实拍截图，删除 3 张旧示意图。
 - 修复沙箱预览 localStorage SecurityError：buildPreview 注入内存存储垫片（仅预览，下载不变）；工程师提示词新增存储 try/catch 要求并迁移 23 条旧角色。
 - 演示账号示例精简：删除演示账号旧会话 5/6/7 及其消息、产物、快照；services/accounts.py 的 DEMO_PROJECTS 改为单个「待办清单 Demo」（PRD/设计/37 行 index.html/QA 测试报告），seed_demo_content 按演示账号当前角色顺序写入消息、产物与 run_plans 快照，仅在无会话时播种。实测：demo 登录只有 1 个会话（done），快照为产品经理→架构师→工程师→QA工程师，4 个产物、html 完整，删除/新建均 403；浏览器内预览操作与下载未实际点测。
