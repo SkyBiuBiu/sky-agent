@@ -40,6 +40,8 @@ Sky Agent：多 Agent 协同站点（类 Atoms）。角色按 SOP 顺序（产�
 
 | 预览 iframe 不加 allow-same-origin，改为 srcdoc 注入内存 Storage 垫片 | 保持沙箱隔离，避免存储访问白屏 |
 
+| 在 /tmp 克隆仓库后同步工作区文件推送；令牌只在命令行临时使用 | 平台 git 目录只读；避免强推和凭证落盘 |
+
 ## Constraints
 - 不使用平台内置模型，也不通过 SecretManager 收集 Key。
 - 使用 Atoms 登录体系；所有数据按 user_id 隔离。
